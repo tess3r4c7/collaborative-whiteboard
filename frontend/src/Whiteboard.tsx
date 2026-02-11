@@ -1,4 +1,7 @@
 import { useRef, useEffect, useState } from "react";
+import { io } from "socket.io-client";
+
+const socket = io("http://localhost:5000");
 
 const Whiteboard = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -10,6 +13,28 @@ const Whiteboard = () => {
 
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+
+    socket.on("stroke", ({type, x, y}) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        if (type == "start") {
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+        }
+        
+        if (type == "draw") {
+            ctx.lineTo(x, y);
+            ctx.stroke();
+        }
+    });
+
+    return () => {
+        socket.off("stroke");
+    };
   }, []);
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -20,8 +45,14 @@ const Whiteboard = () => {
     if (!ctx) return;
 
     ctx.beginPath();
-    ctx.moveTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
+
+    const x = e.nativeEvent.offsetX
+    const y = e.nativeEvent.offsetY
+
+    ctx.moveTo(x, y);
     setIsDrawing(true);
+
+    socket.emit("stroke", {type: "start", x, y});
   };
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -33,8 +64,13 @@ const Whiteboard = () => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    ctx.lineTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
+    const x = e.nativeEvent.offsetX
+    const y = e.nativeEvent.offsetY
+
+    ctx.lineTo(x, y);
     ctx.stroke();
+
+    socket.emit("stroke", {type: "draw", x, y});
   };
 
   const stopDrawing = () => {
