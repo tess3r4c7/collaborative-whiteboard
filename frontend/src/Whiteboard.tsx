@@ -6,6 +6,8 @@ const socket = io("http://localhost:5000");
 const Whiteboard = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const lastEmitTime = useRef(0);
+  const pointBuffer = useRef<{x:number,y:number}[]>([]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -14,26 +16,40 @@ const Whiteboard = () => {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
-    socket.on("stroke", ({type, x, y}) => {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    socket.on("start", ({x, y}) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
 
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
 
-        if (type == "start") {
-            ctx.beginPath();
-            ctx.moveTo(x, y);
-        }
-        
-        if (type == "draw") {
-            ctx.lineTo(x, y);
-            ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+    });
+
+    socket.on("draw", (points) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        for(const p of points) {
+          ctx.lineTo(p.x, p.y);
+          ctx.stroke();
         }
     });
 
     return () => {
-        socket.off("stroke");
+        socket.off("start");
+        socket.off("draw");
     };
   }, []);
 
@@ -52,7 +68,10 @@ const Whiteboard = () => {
     ctx.moveTo(x, y);
     setIsDrawing(true);
 
-    socket.emit("stroke", {type: "start", x, y});
+    pointBuffer.current = [];
+
+    socket.emit("start", {x, y});
+
   };
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -67,14 +86,31 @@ const Whiteboard = () => {
     const x = e.nativeEvent.offsetX
     const y = e.nativeEvent.offsetY
 
+    pointBuffer.current.push({ x, y });
+
     ctx.lineTo(x, y);
     ctx.stroke();
 
-    socket.emit("stroke", {type: "draw", x, y});
+    const now = Date.now();
+
+    if (now - lastEmitTime.current > 16) {
+      if (pointBuffer.current.length > 0) {
+        socket.emit("draw", pointBuffer.current);
+
+        pointBuffer.current = [];
+        lastEmitTime.current = now;
+      }
+    }
+  
   };
 
   const stopDrawing = () => {
     setIsDrawing(false);
+
+    if (pointBuffer.current.length > 0) {
+      socket.emit("draw", pointBuffer.current);
+      pointBuffer.current = [];
+    }
   };
 
   return (

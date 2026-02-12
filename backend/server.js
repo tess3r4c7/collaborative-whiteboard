@@ -21,8 +21,12 @@ io.on("connection", (socket) => {
     console.log("User disconnected:", socket.id);
   });
 
-  socket.on("stroke", (data) => {
-    socket.broadcast.emit("stroke", data);
+  socket.on("start", (data) => {
+    socket.broadcast.emit("start", data);
+  });
+
+  socket.on("draw", (data) => {
+    socket.broadcast.emit("draw", data);
   });
 });
 
