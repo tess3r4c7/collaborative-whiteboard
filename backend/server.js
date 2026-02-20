@@ -28,6 +28,14 @@ io.on("connection", (socket) => {
   socket.on("draw", (data) => {
     socket.broadcast.emit("draw", data);
   });
+
+  socket.on("strokeComplete", (stroke) => {
+    socket.broadcast.emit("strokeComplete", stroke);
+  });
+
+  socket.on("undoStroke", (strokeId) => {
+    socket.broadcast.emit("undoStroke", strokeId);
+  });
 });
 
 app.get("/", (req, res) => {

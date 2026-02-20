@@ -62,9 +62,19 @@ const Whiteboard = () => {
         ctx.stroke();
     });
 
+    socket.on("strokeComplete", (stroke: Stroke) => {
+      setStrokes((prev) => [...prev, stroke]);
+    });
+
+    socket.on("undoStroke", (strokeId: string) => {
+      setStrokes((prev) => prev.filter((s) => s.id !== strokeId));
+    });
+
     return () => {
         socket.off("start");
         socket.off("draw");
+        socket.off("strokeComplete");
+        socket.off("undoStroke");
     };
   }, []);
 
@@ -169,6 +179,7 @@ const Whiteboard = () => {
 
     if (strokeToCommit.points.length > 1) {
       setStrokes((prev) => [...prev, strokeToCommit]);
+      socket.emit("strokeComplete", strokeToCommit);
     }
 
     currentStroke.current = null;
@@ -176,7 +187,20 @@ const Whiteboard = () => {
   };
 
   const handleUndo = () => {
-    setStrokes(prev => prev.slice(0, -1));
+    setStrokes((prev) => {
+      const index = [...prev].reverse().findIndex(
+        (stroke) => stroke.userId === (socket.id || "local")
+      );
+
+      if (index === -1) return prev;
+
+      const realIndex = prev.length - 1 - index;
+      const strokeToRemove = prev[realIndex];
+
+      socket.emit("undoStroke", strokeToRemove.id);
+
+      return prev.filter((s) => s.id !== strokeToRemove.id);
+    });
   };
 
   return (
