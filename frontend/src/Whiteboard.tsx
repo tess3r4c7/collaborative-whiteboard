@@ -10,10 +10,13 @@ type Stroke = {
   id: string;
   userId: string;
   points: Point[];
+  color: string;
 };
 
 const Whiteboard = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null)
+  
   const [isDrawing, setIsDrawing] = useState(false);
 
   const [strokes, setStrokes] = useState<Stroke[]>([]);
@@ -21,6 +24,8 @@ const Whiteboard = () => {
 
   const lastEmitTime = useRef(0);
   const pointBuffer = useRef<Point[]>([]);
+
+  const [color, setColor] = useState("#000000");
 
   const { roomId } = useParams();
 
@@ -39,29 +44,26 @@ const Whiteboard = () => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    ctxRef.current = ctx;
+
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
   }, []);
 
   useEffect(() => {
-    socket.on("start", ({x, y}) => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-
-        const ctx = canvas.getContext("2d");
+    socket.on("start", ({x, y, color}) => {
+        const ctx = ctxRef.current;
         if (!ctx) return;
 
+        ctx.strokeStyle = color;
         ctx.beginPath();
         ctx.moveTo(x, y);
     });
 
     socket.on("draw", (points: Point[]) => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
+        const ctx = ctxRef.current
+        if (!ctx) return
 
         for(const p of points) {
           ctx.lineTo(p.x, p.y);
@@ -78,11 +80,16 @@ const Whiteboard = () => {
       setStrokes((prev) => prev.filter((s) => s.id !== strokeId));
     });
 
+    socket.on("clearCanvas", () => {
+      setStrokes([]);
+    });
+
     return () => {
         socket.off("start");
         socket.off("draw");
         socket.off("strokeComplete");
         socket.off("undoStroke");
+        socket.off("clearCanvas");
     };
   }, []);
 
@@ -94,7 +101,7 @@ const Whiteboard = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d");
+    const ctx = ctxRef.current;
     if (!ctx) return;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -105,6 +112,8 @@ const Whiteboard = () => {
       ctx.beginPath();
       ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
 
+      ctx.strokeStyle = stroke.color;
+
       for (let i = 1; i < stroke.points.length; i++) {
         ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
       }
@@ -114,10 +123,7 @@ const Whiteboard = () => {
   };
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
+    const ctx = ctxRef.current;
     if (!ctx) return;
 
     const x = e.nativeEvent.offsetX
@@ -131,25 +137,25 @@ const Whiteboard = () => {
       id: crypto.randomUUID(),
       userId: socket.id || "local",
       points: [{x, y}],
+      color: color,
     };
 
     currentStroke.current = newStroke;
     pointBuffer.current = [];
 
-    socket.emit("start", {x, y});
+    socket.emit("start", {x, y, color});
   };
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
+    const ctx = ctxRef.current;
     if (!ctx) return;
 
     const x = e.nativeEvent.offsetX
     const y = e.nativeEvent.offsetY
+
+    ctx.strokeStyle = color;
 
     ctx.lineTo(x, y);
     ctx.stroke();
@@ -220,6 +226,11 @@ const Whiteboard = () => {
     }
   };
 
+  const handleClear = () => {
+    setStrokes([]);
+    socket.emit("clearCanvas");
+  };
+
   return (
     <div className="relative w-screen h-screen overflow-hidden">
       <div className="absolute top-4 left-4 z-10 flex gap-2">
@@ -236,6 +247,20 @@ const Whiteboard = () => {
         >
           Copy Link
         </button>
+
+        <button
+          onClick={handleClear}
+          className="bg-red-600 text-white px-4 py-2 rounded"
+        >
+          Clear
+        </button>
+
+        <input
+          type="color"
+          value={color}
+          onChange={(e) => setColor(e.target.value)}
+          className="w-10 h-10 border rounded"
+        />
       </div>
 
       <canvas

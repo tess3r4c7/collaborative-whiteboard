@@ -41,6 +41,10 @@ io.on("connection", (socket) => {
   socket.on("undoStroke", (strokeId) => {
     socket.to(socket.roomId).emit("undoStroke", strokeId);
   });
+
+  socket.on("clearCanvas", () => {
+    socket.to(socket.roomId).emit("clearCanvas");
+  });
 });
 
 app.get("/", (req, res) => {
