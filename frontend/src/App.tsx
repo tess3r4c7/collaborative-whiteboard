@@ -1,10 +1,13 @@
+import { Routes, Route } from "react-router-dom";
 import Whiteboard from "./Whiteboard";
+import Home from "./Home";
 
 function App() {
   return (
-    <div className="h-screen w-screen bg-gray-100">
-      <Whiteboard />
-    </div>
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/room/:roomId" element={<Whiteboard />} />
+    </Routes>
   );
 }
 

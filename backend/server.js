@@ -21,20 +21,25 @@ io.on("connection", (socket) => {
     console.log("User disconnected:", socket.id);
   });
 
+  socket.on("joinRoom", (roomId) => {
+    socket.join(roomId);
+    socket.roomId = roomId;
+  });
+
   socket.on("start", (data) => {
-    socket.broadcast.emit("start", data);
+    socket.to(socket.roomId).emit("start", data);
   });
 
   socket.on("draw", (data) => {
-    socket.broadcast.emit("draw", data);
+    socket.to(socket.roomId).emit("draw", data);
   });
 
   socket.on("strokeComplete", (stroke) => {
-    socket.broadcast.emit("strokeComplete", stroke);
+    socket.to(socket.roomId).emit("strokeComplete", stroke);
   });
 
   socket.on("undoStroke", (strokeId) => {
-    socket.broadcast.emit("undoStroke", strokeId);
+    socket.to(socket.roomId).emit("undoStroke", strokeId);
   });
 });
 

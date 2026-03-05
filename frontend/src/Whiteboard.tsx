@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState } from "react";
 import { io } from "socket.io-client";
+import { useParams } from "react-router-dom";
 
 const socket = io("http://localhost:5000");
 
@@ -20,6 +21,13 @@ const Whiteboard = () => {
 
   const lastEmitTime = useRef(0);
   const pointBuffer = useRef<Point[]>([]);
+
+  const { roomId } = useParams();
+
+  useEffect(() => {
+    if (!roomId) return;
+    socket.emit("joinRoom", roomId);
+  }, [roomId]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -203,18 +211,39 @@ const Whiteboard = () => {
     });
   };
 
+  const copyRoomLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      alert("Room link copied to clipboard!");
+    } catch {
+      alert("Failed to copy link");
+    }
+  };
+
   return (
     <div className="relative w-screen h-screen overflow-hidden">
-      <button
-        onClick={handleUndo}
-        className="absolute top-4 left-4 z-10 bg-black text-white px-4 py-2 rounded"
-      >
-        Undo
-      </button>
+      <div className="absolute top-4 left-4 z-10 flex gap-2">
+        <button
+          onClick={handleUndo}
+          className="bg-black text-white px-4 py-2 rounded"
+        >
+          Undo
+        </button>
+
+        <button
+          onClick={copyRoomLink}
+          className="bg-blue-600 text-white px-4 py-2 rounded"
+        >
+          Copy Link
+        </button>
+      </div>
 
       <canvas
         ref={canvasRef}
-        className="absolute top-0 left-0 w-full h-full bg-white cursor-crosshair"
+        className="absolute top-0 left-0 w-full h-full bg-white"
+        style={{
+          cursor: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Cline x1='10' y1='0' x2='10' y2='20' stroke='black' stroke-width='1.5'/%3E%3Cline x1='0' y1='10' x2='20' y2='10' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 10 10, crosshair`
+        }}
         onMouseDown={startDrawing}
         onMouseMove={draw}
         onMouseUp={stopDrawing}
