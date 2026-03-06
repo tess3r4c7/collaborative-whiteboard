@@ -11,11 +11,12 @@ type Stroke = {
   userId: string;
   points: Point[];
   color: string;
+  width: number;
 };
 
 const Whiteboard = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const ctxRef = useRef<CanvasRenderingContext2D | null>(null)
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   
   const [isDrawing, setIsDrawing] = useState(false);
 
@@ -26,6 +27,7 @@ const Whiteboard = () => {
   const pointBuffer = useRef<Point[]>([]);
 
   const [color, setColor] = useState("#000000");
+  const [width, setWidth] = useState(2);
 
   const { roomId } = useParams();
 
@@ -52,10 +54,11 @@ const Whiteboard = () => {
   }, []);
 
   useEffect(() => {
-    socket.on("start", ({x, y, color}) => {
+    socket.on("start", ({x, y, color, width}) => {
         const ctx = ctxRef.current;
         if (!ctx) return;
 
+        ctx.lineWidth = width;
         ctx.strokeStyle = color;
         ctx.beginPath();
         ctx.moveTo(x, y);
@@ -76,6 +79,10 @@ const Whiteboard = () => {
       setStrokes((prev) => [...prev, stroke]);
     });
 
+    socket.on("loadStrokes", (strokes: Stroke[]) => {
+      setStrokes((prev) => [...prev, ...strokes]);
+    });
+
     socket.on("undoStroke", (strokeId: string) => {
       setStrokes((prev) => prev.filter((s) => s.id !== strokeId));
     });
@@ -88,6 +95,7 @@ const Whiteboard = () => {
         socket.off("start");
         socket.off("draw");
         socket.off("strokeComplete");
+        socket.off("loadStrokes");
         socket.off("undoStroke");
         socket.off("clearCanvas");
     };
@@ -113,6 +121,7 @@ const Whiteboard = () => {
       ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
 
       ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = stroke.width;
 
       for (let i = 1; i < stroke.points.length; i++) {
         ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
@@ -138,12 +147,13 @@ const Whiteboard = () => {
       userId: socket.id || "local",
       points: [{x, y}],
       color: color,
+      width: width,
     };
 
     currentStroke.current = newStroke;
     pointBuffer.current = [];
 
-    socket.emit("start", {x, y, color});
+    socket.emit("start", {x, y, color, width});
   };
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -155,6 +165,7 @@ const Whiteboard = () => {
     const x = e.nativeEvent.offsetX
     const y = e.nativeEvent.offsetY
 
+    ctx.lineWidth = width;
     ctx.strokeStyle = color;
 
     ctx.lineTo(x, y);
@@ -231,6 +242,16 @@ const Whiteboard = () => {
     socket.emit("clearCanvas");
   };
 
+  const exportImage = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const link = document.createElement("a");
+    link.download = "whiteboard.png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  };
+
   return (
     <div className="relative w-screen h-screen overflow-hidden">
       <div className="absolute top-4 left-4 z-10 flex gap-2">
@@ -255,11 +276,27 @@ const Whiteboard = () => {
           Clear
         </button>
 
+        <button
+          onClick={exportImage}
+          className="bg-green-600 text-white px-4 py-2 rounded"
+        >
+          Export
+        </button>
+
         <input
           type="color"
           value={color}
           onChange={(e) => setColor(e.target.value)}
           className="w-10 h-10 border rounded"
+        />
+
+        <input
+          type="range"
+          value={width}
+          min="1"
+          max="10"
+          onChange={(e) => setWidth(Number(e.target.value))}
+          className="w-24"
         />
       </div>
 
