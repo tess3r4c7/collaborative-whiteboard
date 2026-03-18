@@ -29,6 +29,8 @@ const Whiteboard = () => {
   const [color, setColor] = useState("#000000");
   const [width, setWidth] = useState(2);
 
+  const [tool, setTool] = useState<"pen" | "eraser">("pen");
+
   const { roomId } = useParams();
 
   useEffect(() => {
@@ -40,8 +42,9 @@ const Whiteboard = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -91,6 +94,10 @@ const Whiteboard = () => {
       setStrokes([]);
     });
 
+    socket.on("eraseStroke", (strokeId: string) => {
+      setStrokes((prev) => prev.filter((s) => s.id !== strokeId));
+    });
+
     return () => {
         socket.off("start");
         socket.off("draw");
@@ -98,11 +105,26 @@ const Whiteboard = () => {
         socket.off("loadStrokes");
         socket.off("undoStroke");
         socket.off("clearCanvas");
+        socket.off("eraseStroke");
     };
   }, []);
 
   useEffect(() => {
     redrawCanvas();
+  }, [strokes]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+      redrawCanvas();
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, [strokes]);
 
   const redrawCanvas = () => {
@@ -132,20 +154,23 @@ const Whiteboard = () => {
   };
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    setIsDrawing(true);
+
+    if (tool === "eraser") return;
+
     const ctx = ctxRef.current;
     if (!ctx) return;
 
-    const x = e.nativeEvent.offsetX
-    const y = e.nativeEvent.offsetY
+    const x = e.nativeEvent.offsetX;
+    const y = e.nativeEvent.offsetY;
 
     ctx.beginPath();
     ctx.moveTo(x, y);
-    setIsDrawing(true);
 
     const newStroke: Stroke = {
       id: crypto.randomUUID(),
       userId: socket.id || "local",
-      points: [{x, y}],
+      points: [{ x, y }],
       color: color,
       width: width,
     };
@@ -153,17 +178,22 @@ const Whiteboard = () => {
     currentStroke.current = newStroke;
     pointBuffer.current = [];
 
-    socket.emit("start", {x, y, color, width});
+    socket.emit("start", { x, y, color, width });
   };
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const x = e.nativeEvent.offsetX;
+    const y = e.nativeEvent.offsetY;
+
+    if (tool === "eraser") {
+      if (isDrawing) handleErase(x, y);
+      return;
+    }
+
     if (!isDrawing) return;
 
     const ctx = ctxRef.current;
     if (!ctx) return;
-
-    const x = e.nativeEvent.offsetX
-    const y = e.nativeEvent.offsetY
 
     ctx.lineWidth = width;
     ctx.strokeStyle = color;
@@ -190,10 +220,11 @@ const Whiteboard = () => {
   };
 
   const stopDrawing = () => {
-    if (!currentStroke.current) {
-      setIsDrawing(false);
-      return;
-    }
+    setIsDrawing(false);
+
+    if (tool === "eraser") return; // 👈 nothing to commit
+
+    if (!currentStroke.current) return;
 
     if (pointBuffer.current.length > 0) {
       socket.emit("draw", pointBuffer.current);
@@ -208,7 +239,6 @@ const Whiteboard = () => {
     }
 
     currentStroke.current = null;
-    setIsDrawing(false);
   };
 
   const handleUndo = () => {
@@ -242,6 +272,28 @@ const Whiteboard = () => {
     socket.emit("clearCanvas");
   };
 
+  const handleErase = (x: number, y: number) => {
+    const threshold = 10;
+
+    setStrokes((prev) => {
+      const remaining = prev.filter((stroke) => {
+        return !stroke.points.some((p) => {
+          const dx = p.x - x;
+          const dy = p.y - y;
+          return Math.sqrt(dx * dx + dy * dy) < threshold;
+        });
+      });
+
+      const removed = prev.filter((s) => !remaining.includes(s));
+
+      removed.forEach((s) => {
+        socket.emit("eraseStroke", s.id);
+      });
+
+      return remaining;
+    });
+  };
+
   const exportImage = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -254,7 +306,14 @@ const Whiteboard = () => {
 
   return (
     <div className="relative w-screen h-screen overflow-hidden">
-      <div className="absolute top-4 left-4 z-10 flex gap-2">
+      <div className="absolute top-4 left-4 z-10 flex gap-2 items-center h-10">
+        <button
+          onClick={() => setTool(tool === "pen" ? "eraser" : "pen")}
+          className="bg-gray-700 text-white px-3 py-2 rounded w-20 h-10"
+        >
+          {tool === "pen" ? "Pen" : "Eraser"}
+        </button>
+
         <button
           onClick={handleUndo}
           className="bg-black text-white px-4 py-2 rounded"
@@ -304,7 +363,9 @@ const Whiteboard = () => {
         ref={canvasRef}
         className="absolute top-0 left-0 w-full h-full bg-white"
         style={{
-          cursor: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Cline x1='10' y1='0' x2='10' y2='20' stroke='black' stroke-width='1.5'/%3E%3Cline x1='0' y1='10' x2='20' y2='10' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 10 10, crosshair`
+          cursor: tool === "eraser" 
+            ? `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Crect x='2' y='6' width='16' height='10' rx='2' fill='%23fff' stroke='%23555' stroke-width='1.5'/%3E%3Crect x='2' y='6' width='7' height='10' rx='2' fill='%23f87171' stroke='%23555' stroke-width='1.5'/%3E%3C/svg%3E") 10 10, cell`
+            : `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Cline x1='10' y1='0' x2='10' y2='20' stroke='black' stroke-width='1.5'/%3E%3Cline x1='0' y1='10' x2='20' y2='10' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 10 10, crosshair`
         }}
         onMouseDown={startDrawing}
         onMouseMove={draw}

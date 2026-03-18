@@ -21,6 +21,16 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
+
+    const room = socket.roomId;
+
+    if (!room) return;
+
+    const clients = io.sockets.adapter.rooms.get(room);
+
+    if (!clients || clients.size === 0) {
+      delete roomStrokes[room];
+    }
   });
 
   socket.on("joinRoom", (roomId) => {
@@ -49,7 +59,7 @@ io.on("connection", (socket) => {
 
   socket.on("undoStroke", (strokeId) => {
     if (roomStrokes[socket.roomId]) {
-      roomStrokes[socket.roomId] = roomStrokes[socket.roomId].filter(s => s.id !== strokeId);
+      roomStrokes[socket.roomId] = roomStrokes[socket.roomId].filter((s) => s.id !== strokeId);
     }
     
     socket.to(socket.roomId).emit("undoStroke", strokeId);
@@ -58,6 +68,14 @@ io.on("connection", (socket) => {
   socket.on("clearCanvas", () => {
     roomStrokes[socket.roomId] = [];
     socket.to(socket.roomId).emit("clearCanvas");
+  });
+
+  socket.on("eraseStroke", (strokeId) => {
+    if (roomStrokes[socket.roomId]) {
+      roomStrokes[socket.roomId] = roomStrokes[socket.roomId].filter((s) => s.id !== strokeId);
+    }
+
+    socket.to(socket.roomId).emit("eraseStroke", strokeId);
   });
 });
 
