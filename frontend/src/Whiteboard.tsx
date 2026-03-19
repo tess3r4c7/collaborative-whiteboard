@@ -2,7 +2,7 @@ import { useRef, useEffect, useState } from "react";
 import { io } from "socket.io-client";
 import { useParams } from "react-router-dom";
 
-const socket = io("http://localhost:5000");
+const socket = io("https://whiteboard-backend-c3yc.onrender.com/");
 
 type Point = {x: number, y: number};
 
