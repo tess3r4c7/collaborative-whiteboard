@@ -18,8 +18,8 @@ type Stroke = {
   width: number;
 };
 
-const CANVAS_WIDTH = 1920;
-const CANVAS_HEIGHT = 1080;
+const CANVAS_WIDTH = 1600;
+const CANVAS_HEIGHT = 900;
 
 const Whiteboard = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -85,13 +85,23 @@ const Whiteboard = () => {
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
-    // Center the canvas so user can pan in all directions
+    // Position canvas: centered horizontally, below toolbar vertically
     const vw = window.innerWidth;
     const vh = window.innerHeight;
+    const TOOLBAR_HEIGHT = 52;
+    const GAP = 16;
+
     panOffset.current = {
-      x: -(CANVAS_WIDTH - vw) / 2,
-      y: -(CANVAS_HEIGHT - vh) / 2,
+      x: (vw - CANVAS_WIDTH) / 2,
+      y: TOOLBAR_HEIGHT + GAP,
     };
+    // On phones (canvas wider than viewport), center it
+    if (CANVAS_WIDTH > vw) {
+      panOffset.current.x = -(CANVAS_WIDTH - vw) / 2;
+    }
+    if (CANVAS_HEIGHT > vh) {
+      panOffset.current.y = -(CANVAS_HEIGHT - vh) / 2;
+    }
     scaleRef.current = 1;
     applyTransform();
   }, []);
@@ -479,7 +489,7 @@ const Whiteboard = () => {
   };
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden" style={{ touchAction: "none" }}>
+    <div className="relative w-screen h-screen overflow-hidden" style={{ touchAction: "none", backgroundColor: "#e5e7eb" }}>
       {/* Toolbar — stays fixed in viewport, above the panning layer */}
       <div className="absolute top-2 left-2 z-10 flex flex-wrap gap-1.5 sm:gap-2 items-center max-w-[calc(100vw-1rem)]">
         <button
@@ -543,6 +553,8 @@ const Whiteboard = () => {
             width: CANVAS_WIDTH,
             height: CANVAS_HEIGHT,
             touchAction: "none",
+            boxShadow: "0 2px 16px rgba(0,0,0,0.12)",
+            borderRadius: 4,
             cursor: tool === "eraser"
               ? `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Crect x='2' y='6' width='16' height='10' rx='2' fill='%23fff' stroke='%23555' stroke-width='1.5'/%3E%3Crect x='2' y='6' width='7' height='10' rx='2' fill='%23f87171' stroke='%23555' stroke-width='1.5'/%3E%3C/svg%3E") 10 10, cell`
               : `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Cline x1='10' y1='0' x2='10' y2='20' stroke='black' stroke-width='1.5'/%3E%3Cline x1='0' y1='10' x2='20' y2='10' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 10 10, crosshair`
