@@ -18,9 +18,13 @@ type Stroke = {
   width: number;
 };
 
+const CANVAS_WIDTH = 3000;
+const CANVAS_HEIGHT = 3000;
+
 const Whiteboard = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
 
   const [isDrawing, setIsDrawing] = useState(false);
 
@@ -29,6 +33,11 @@ const Whiteboard = () => {
 
   const lastEmitTime = useRef(0);
   const pointBuffer = useRef<Point[]>([]);
+
+  // Pan state (refs for 60fps direct DOM updates, no re-renders)
+  const panOffset = useRef({ x: 0, y: 0 });
+  const lastPinchCenter = useRef({ x: 0, y: 0 });
+  const isPanning = useRef(false);
 
   const [color, setColor] = useState("#000000");
   const [width, setWidth] = useState(2);
@@ -61,9 +70,9 @@ const Whiteboard = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width;
-    canvas.height = rect.height;
+    // Fixed large canvas for pannable workspace
+    canvas.width = CANVAS_WIDTH;
+    canvas.height = CANVAS_HEIGHT;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -73,6 +82,18 @@ const Whiteboard = () => {
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
+
+    // Center the canvas so user can pan in all directions
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    panOffset.current = {
+      x: -(CANVAS_WIDTH - vw) / 2,
+      y: -(CANVAS_HEIGHT - vh) / 2,
+    };
+    if (canvasWrapperRef.current) {
+      canvasWrapperRef.current.style.transform =
+        `translate(${panOffset.current.x}px, ${panOffset.current.y}px)`;
+    }
   }, []);
 
   useEffect(() => {
@@ -135,11 +156,6 @@ const Whiteboard = () => {
 
   useEffect(() => {
     const handleResize = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width;
-      canvas.height = rect.height;
       redrawCanvas();
     };
 
@@ -182,6 +198,12 @@ const Whiteboard = () => {
       y: touch.clientY - rect.top,
     };
   };
+
+  // Midpoint between two touches (for pan gesture)
+  const getMidpoint = (t1: Touch, t2: Touch): Point => ({
+    x: (t1.clientX + t2.clientX) / 2,
+    y: (t1.clientY + t2.clientY) / 2,
+  });
 
   // ─── Core drawing logic (coordinates only, no event type dependency) ───
 
@@ -277,7 +299,7 @@ const Whiteboard = () => {
     handleDraw(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
   };
 
-  // ─── Touch event listeners (attached via useEffect for passive: false) ───
+  // ─── Touch event listeners (1 finger = draw, 2 fingers = pan) ───
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -285,21 +307,69 @@ const Whiteboard = () => {
 
     const onTouchStart = (e: TouchEvent) => {
       e.preventDefault();
-      const touch = e.touches[0];
-      const pos = getTouchPos(touch);
-      handleStartDrawing(pos.x, pos.y);
+
+      // Two fingers → start panning
+      if (e.touches.length === 2) {
+        isPanning.current = true;
+        // Cancel any in-progress stroke
+        if (currentStroke.current) {
+          currentStroke.current = null;
+          pointBuffer.current = [];
+          setIsDrawing(false);
+        }
+        lastPinchCenter.current = getMidpoint(e.touches[0], e.touches[1]);
+        return;
+      }
+
+      // One finger → draw (only if not already panning)
+      if (e.touches.length === 1 && !isPanning.current) {
+        const pos = getTouchPos(e.touches[0]);
+        handleStartDrawing(pos.x, pos.y);
+      }
     };
 
     const onTouchMove = (e: TouchEvent) => {
       e.preventDefault();
-      const touch = e.touches[0];
-      const pos = getTouchPos(touch);
-      handleDraw(pos.x, pos.y);
+
+      // Panning with two fingers
+      if (isPanning.current && e.touches.length >= 2) {
+        const mid = getMidpoint(e.touches[0], e.touches[1]);
+        const dx = mid.x - lastPinchCenter.current.x;
+        const dy = mid.y - lastPinchCenter.current.y;
+
+        panOffset.current.x += dx;
+        panOffset.current.y += dy;
+        lastPinchCenter.current = mid;
+
+        if (canvasWrapperRef.current) {
+          canvasWrapperRef.current.style.transform =
+            `translate(${panOffset.current.x}px, ${panOffset.current.y}px)`;
+        }
+        return;
+      }
+
+      // Drawing with one finger
+      if (e.touches.length === 1 && !isPanning.current) {
+        const pos = getTouchPos(e.touches[0]);
+        handleDraw(pos.x, pos.y);
+      }
     };
 
     const onTouchEnd = (e: TouchEvent) => {
       e.preventDefault();
-      handleStopDrawing();
+
+      // If panning, stop when all fingers are lifted
+      if (isPanning.current) {
+        if (e.touches.length === 0) {
+          isPanning.current = false;
+        }
+        return;
+      }
+
+      // Stop drawing when finger is lifted
+      if (e.touches.length === 0) {
+        handleStopDrawing();
+      }
     };
 
     canvas.addEventListener("touchstart", onTouchStart, { passive: false });
@@ -378,6 +448,7 @@ const Whiteboard = () => {
 
   return (
     <div className="relative w-screen h-screen overflow-hidden" style={{ touchAction: "none" }}>
+      {/* Toolbar — stays fixed in viewport, above the panning layer */}
       <div className="absolute top-2 left-2 z-10 flex flex-wrap gap-1.5 sm:gap-2 items-center max-w-[calc(100vw-1rem)]">
         <button
           onClick={() => setTool(tool === "pen" ? "eraser" : "pen")}
@@ -431,20 +502,25 @@ const Whiteboard = () => {
         />
       </div>
 
-      <canvas
-        ref={canvasRef}
-        className="absolute top-0 left-0 w-full h-full bg-white"
-        style={{
-          touchAction: "none",
-          cursor: tool === "eraser"
-            ? `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Crect x='2' y='6' width='16' height='10' rx='2' fill='%23fff' stroke='%23555' stroke-width='1.5'/%3E%3Crect x='2' y='6' width='7' height='10' rx='2' fill='%23f87171' stroke='%23555' stroke-width='1.5'/%3E%3C/svg%3E") 10 10, cell`
-            : `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Cline x1='10' y1='0' x2='10' y2='20' stroke='black' stroke-width='1.5'/%3E%3Cline x1='0' y1='10' x2='20' y2='10' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 10 10, crosshair`
-        }}
-        onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={handleStopDrawing}
-        onMouseLeave={handleStopDrawing}
-      />
+      {/* Pannable canvas wrapper — translated via ref for 60fps panning */}
+      <div ref={canvasWrapperRef} style={{ position: "absolute", top: 0, left: 0 }}>
+        <canvas
+          ref={canvasRef}
+          className="bg-white"
+          style={{
+            width: CANVAS_WIDTH,
+            height: CANVAS_HEIGHT,
+            touchAction: "none",
+            cursor: tool === "eraser"
+              ? `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Crect x='2' y='6' width='16' height='10' rx='2' fill='%23fff' stroke='%23555' stroke-width='1.5'/%3E%3Crect x='2' y='6' width='7' height='10' rx='2' fill='%23f87171' stroke='%23555' stroke-width='1.5'/%3E%3C/svg%3E") 10 10, cell`
+              : `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Cline x1='10' y1='0' x2='10' y2='20' stroke='black' stroke-width='1.5'/%3E%3Cline x1='0' y1='10' x2='20' y2='10' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 10 10, crosshair`
+          }}
+          onMouseDown={onMouseDown}
+          onMouseMove={onMouseMove}
+          onMouseUp={handleStopDrawing}
+          onMouseLeave={handleStopDrawing}
+        />
+      </div>
     </div>
   );
 };
