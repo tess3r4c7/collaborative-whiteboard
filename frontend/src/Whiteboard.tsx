@@ -34,9 +34,11 @@ const Whiteboard = () => {
   const lastEmitTime = useRef(0);
   const pointBuffer = useRef<Point[]>([]);
 
-  // Pan state (refs for 60fps direct DOM updates, no re-renders)
+  // Pan & zoom state (refs for 60fps direct DOM updates, no re-renders)
   const panOffset = useRef({ x: 0, y: 0 });
+  const scaleRef = useRef(1);
   const lastPinchCenter = useRef({ x: 0, y: 0 });
+  const lastPinchDist = useRef(0);
   const isPanning = useRef(false);
 
   const [color, setColor] = useState("#000000");
@@ -90,10 +92,8 @@ const Whiteboard = () => {
       x: -(CANVAS_WIDTH - vw) / 2,
       y: -(CANVAS_HEIGHT - vh) / 2,
     };
-    if (canvasWrapperRef.current) {
-      canvasWrapperRef.current.style.transform =
-        `translate(${panOffset.current.x}px, ${panOffset.current.y}px)`;
-    }
+    scaleRef.current = 1;
+    applyTransform();
   }, []);
 
   useEffect(() => {
@@ -189,13 +189,23 @@ const Whiteboard = () => {
     }
   };
 
+  // Apply combined translate + scale transform to the canvas wrapper
+  const applyTransform = () => {
+    if (canvasWrapperRef.current) {
+      canvasWrapperRef.current.style.transform =
+        `translate(${panOffset.current.x}px, ${panOffset.current.y}px) scale(${scaleRef.current})`;
+      canvasWrapperRef.current.style.transformOrigin = "0 0";
+    }
+  };
+
   // Helper to get canvas-relative coordinates from a touch event
+  // Accounts for CSS scale by using the ratio of canvas pixels to visual pixels
   const getTouchPos = (touch: Touch): Point => {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
     return {
-      x: touch.clientX - rect.left,
-      y: touch.clientY - rect.top,
+      x: (touch.clientX - rect.left) * (canvas.width / rect.width),
+      y: (touch.clientY - rect.top) * (canvas.height / rect.height),
     };
   };
 
@@ -204,6 +214,13 @@ const Whiteboard = () => {
     x: (t1.clientX + t2.clientX) / 2,
     y: (t1.clientY + t2.clientY) / 2,
   });
+
+  // Distance between two touches (for pinch-to-zoom)
+  const getDistance = (t1: Touch, t2: Touch): number => {
+    const dx = t1.clientX - t2.clientX;
+    const dy = t1.clientY - t2.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
 
   // ─── Core drawing logic (coordinates only, no event type dependency) ───
 
@@ -299,7 +316,7 @@ const Whiteboard = () => {
     handleDraw(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
   };
 
-  // ─── Touch event listeners (1 finger = draw, 2 fingers = pan) ───
+  // ─── Touch event listeners (1 finger = draw, 2 fingers = pan + zoom) ───
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -308,7 +325,7 @@ const Whiteboard = () => {
     const onTouchStart = (e: TouchEvent) => {
       e.preventDefault();
 
-      // Two fingers → start panning
+      // Two fingers → start panning + zooming
       if (e.touches.length === 2) {
         isPanning.current = true;
         // Cancel any in-progress stroke
@@ -318,6 +335,7 @@ const Whiteboard = () => {
           setIsDrawing(false);
         }
         lastPinchCenter.current = getMidpoint(e.touches[0], e.touches[1]);
+        lastPinchDist.current = getDistance(e.touches[0], e.touches[1]);
         return;
       }
 
@@ -331,20 +349,34 @@ const Whiteboard = () => {
     const onTouchMove = (e: TouchEvent) => {
       e.preventDefault();
 
-      // Panning with two fingers
+      // Pan + zoom with two fingers
       if (isPanning.current && e.touches.length >= 2) {
         const mid = getMidpoint(e.touches[0], e.touches[1]);
+        const dist = getDistance(e.touches[0], e.touches[1]);
+
+        // --- Zoom (pinch) ---
+        if (lastPinchDist.current > 0) {
+          const zoomRatio = dist / lastPinchDist.current;
+          const oldScale = scaleRef.current;
+          const newScale = Math.min(3, Math.max(0.3, oldScale * zoomRatio));
+          const actualRatio = newScale / oldScale;
+
+          // Focal-point zoom: keep the midpoint between fingers stationary
+          panOffset.current.x = mid.x - (mid.x - panOffset.current.x) * actualRatio;
+          panOffset.current.y = mid.y - (mid.y - panOffset.current.y) * actualRatio;
+          scaleRef.current = newScale;
+        }
+
+        // --- Pan ---
         const dx = mid.x - lastPinchCenter.current.x;
         const dy = mid.y - lastPinchCenter.current.y;
-
         panOffset.current.x += dx;
         panOffset.current.y += dy;
-        lastPinchCenter.current = mid;
 
-        if (canvasWrapperRef.current) {
-          canvasWrapperRef.current.style.transform =
-            `translate(${panOffset.current.x}px, ${panOffset.current.y}px)`;
-        }
+        lastPinchCenter.current = mid;
+        lastPinchDist.current = dist;
+
+        applyTransform();
         return;
       }
 
