@@ -18,8 +18,8 @@ type Stroke = {
   width: number;
 };
 
-const CANVAS_WIDTH = 3000;
-const CANVAS_HEIGHT = 3000;
+const CANVAS_WIDTH = 1920;
+const CANVAS_HEIGHT = 1080;
 
 const Whiteboard = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
