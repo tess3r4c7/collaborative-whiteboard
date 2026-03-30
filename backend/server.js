@@ -45,19 +45,23 @@ io.on("connection", (socket) => {
   });
 
   socket.on("start", (data) => {
+    if (!socket.roomId) return;
     socket.to(socket.roomId).emit("start", data);
   });
 
   socket.on("draw", (data) => {
+    if (!socket.roomId) return;
     socket.to(socket.roomId).emit("draw", data);
   });
 
   socket.on("strokeComplete", (stroke) => {
+    if (!socket.roomId || !roomStrokes[socket.roomId]) return;
     roomStrokes[socket.roomId].push(stroke);
     socket.to(socket.roomId).emit("strokeComplete", stroke);
   });
 
   socket.on("undoStroke", (strokeId) => {
+    if (!socket.roomId) return;
     if (roomStrokes[socket.roomId]) {
       roomStrokes[socket.roomId] = roomStrokes[socket.roomId].filter((s) => s.id !== strokeId);
     }
@@ -66,11 +70,13 @@ io.on("connection", (socket) => {
   });
 
   socket.on("clearCanvas", () => {
+    if (!socket.roomId) return;
     roomStrokes[socket.roomId] = [];
     socket.to(socket.roomId).emit("clearCanvas");
   });
 
   socket.on("eraseStroke", (strokeId) => {
+    if (!socket.roomId) return;
     if (roomStrokes[socket.roomId]) {
       roomStrokes[socket.roomId] = roomStrokes[socket.roomId].filter((s) => s.id !== strokeId);
     }

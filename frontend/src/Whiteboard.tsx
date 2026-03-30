@@ -1,10 +1,14 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { io } from "socket.io-client";
 import { useParams } from "react-router-dom";
 
-const socket = io("https://whiteboard-backend-c3yc.onrender.com/");
+const socket = io("https://whiteboard-backend-c3yc.onrender.com/", {
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 1000,
+});
 
-type Point = {x: number, y: number};
+type Point = { x: number, y: number };
 
 type Stroke = {
   id: string;
@@ -17,7 +21,7 @@ type Stroke = {
 const Whiteboard = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
-  
+
   const [isDrawing, setIsDrawing] = useState(false);
 
   const [strokes, setStrokes] = useState<Stroke[]>([]);
@@ -35,7 +39,22 @@ const Whiteboard = () => {
 
   useEffect(() => {
     if (!roomId) return;
-    socket.emit("joinRoom", roomId);
+
+    const joinRoom = () => {
+      socket.emit("joinRoom", roomId);
+    };
+
+    // Join immediately if already connected
+    if (socket.connected) {
+      joinRoom();
+    }
+
+    // Re-join on every (re)connect so the server always knows our room
+    socket.on("connect", joinRoom);
+
+    return () => {
+      socket.off("connect", joinRoom);
+    };
   }, [roomId]);
 
   useEffect(() => {
@@ -57,33 +76,34 @@ const Whiteboard = () => {
   }, []);
 
   useEffect(() => {
-    socket.on("start", ({x, y, color, width}) => {
-        const ctx = ctxRef.current;
-        if (!ctx) return;
+    socket.on("start", ({ x, y, color, width }) => {
+      const ctx = ctxRef.current;
+      if (!ctx) return;
 
-        ctx.lineWidth = width;
-        ctx.strokeStyle = color;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
+      ctx.lineWidth = width;
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
     });
 
     socket.on("draw", (points: Point[]) => {
-        const ctx = ctxRef.current
-        if (!ctx) return
+      const ctx = ctxRef.current
+      if (!ctx) return
 
-        for(const p of points) {
-          ctx.lineTo(p.x, p.y);
-        }
+      for (const p of points) {
+        ctx.lineTo(p.x, p.y);
+      }
 
-        ctx.stroke();
+      ctx.stroke();
     });
 
     socket.on("strokeComplete", (stroke: Stroke) => {
       setStrokes((prev) => [...prev, stroke]);
     });
 
-    socket.on("loadStrokes", (strokes: Stroke[]) => {
-      setStrokes((prev) => [...prev, ...strokes]);
+    // Replace (not append) to avoid duplicates on reconnect
+    socket.on("loadStrokes", (loadedStrokes: Stroke[]) => {
+      setStrokes(loadedStrokes);
     });
 
     socket.on("undoStroke", (strokeId: string) => {
@@ -99,13 +119,13 @@ const Whiteboard = () => {
     });
 
     return () => {
-        socket.off("start");
-        socket.off("draw");
-        socket.off("strokeComplete");
-        socket.off("loadStrokes");
-        socket.off("undoStroke");
-        socket.off("clearCanvas");
-        socket.off("eraseStroke");
+      socket.off("start");
+      socket.off("draw");
+      socket.off("strokeComplete");
+      socket.off("loadStrokes");
+      socket.off("undoStroke");
+      socket.off("clearCanvas");
+      socket.off("eraseStroke");
     };
   }, []);
 
@@ -153,16 +173,25 @@ const Whiteboard = () => {
     }
   };
 
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Helper to get canvas-relative coordinates from a touch event
+  const getTouchPos = (touch: Touch): Point => {
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: touch.clientX - rect.left,
+      y: touch.clientY - rect.top,
+    };
+  };
+
+  // ─── Core drawing logic (coordinates only, no event type dependency) ───
+
+  const handleStartDrawing = useCallback((x: number, y: number) => {
     setIsDrawing(true);
 
     if (tool === "eraser") return;
 
     const ctx = ctxRef.current;
     if (!ctx) return;
-
-    const x = e.nativeEvent.offsetX;
-    const y = e.nativeEvent.offsetY;
 
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -179,12 +208,9 @@ const Whiteboard = () => {
     pointBuffer.current = [];
 
     socket.emit("start", { x, y, color, width });
-  };
+  }, [tool, color, width]);
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const x = e.nativeEvent.offsetX;
-    const y = e.nativeEvent.offsetY;
-
+  const handleDraw = useCallback((x: number, y: number) => {
     if (tool === "eraser") {
       if (isDrawing) handleErase(x, y);
       return;
@@ -202,10 +228,10 @@ const Whiteboard = () => {
     ctx.stroke();
 
     if (currentStroke.current) {
-      currentStroke.current.points.push({x, y});
+      currentStroke.current.points.push({ x, y });
     }
 
-    pointBuffer.current.push({x, y});
+    pointBuffer.current.push({ x, y });
 
     const now = Date.now();
 
@@ -217,12 +243,12 @@ const Whiteboard = () => {
         lastEmitTime.current = now;
       }
     }
-  };
+  }, [tool, isDrawing, color, width]);
 
-  const stopDrawing = () => {
+  const handleStopDrawing = useCallback(() => {
     setIsDrawing(false);
 
-    if (tool === "eraser") return; // 👈 nothing to commit
+    if (tool === "eraser") return;
 
     if (!currentStroke.current) return;
 
@@ -239,7 +265,53 @@ const Whiteboard = () => {
     }
 
     currentStroke.current = null;
+  }, [tool]);
+
+  // ─── Mouse event wrappers ───
+
+  const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    handleStartDrawing(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
   };
+
+  const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    handleDraw(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
+  };
+
+  // ─── Touch event listeners (attached via useEffect for passive: false) ───
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const onTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      const pos = getTouchPos(touch);
+      handleStartDrawing(pos.x, pos.y);
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      const pos = getTouchPos(touch);
+      handleDraw(pos.x, pos.y);
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      e.preventDefault();
+      handleStopDrawing();
+    };
+
+    canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    canvas.addEventListener("touchend", onTouchEnd, { passive: false });
+
+    return () => {
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [handleStartDrawing, handleDraw, handleStopDrawing]);
 
   const handleUndo = () => {
     setStrokes((prev) => {
@@ -305,39 +377,39 @@ const Whiteboard = () => {
   };
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden">
-      <div className="absolute top-4 left-4 z-10 flex gap-2 items-center h-10">
+    <div className="relative w-screen h-screen overflow-hidden" style={{ touchAction: "none" }}>
+      <div className="absolute top-2 left-2 z-10 flex flex-wrap gap-1.5 sm:gap-2 items-center max-w-[calc(100vw-1rem)]">
         <button
           onClick={() => setTool(tool === "pen" ? "eraser" : "pen")}
-          className="bg-gray-700 text-white px-3 py-2 rounded w-20 h-10"
+          className="bg-gray-700 text-white px-2 sm:px-3 py-1.5 sm:py-2 rounded text-sm sm:text-base w-16 sm:w-20"
         >
           {tool === "pen" ? "Pen" : "Eraser"}
         </button>
 
         <button
           onClick={handleUndo}
-          className="bg-black text-white px-4 py-2 rounded"
+          className="bg-black text-white px-2 sm:px-4 py-1.5 sm:py-2 rounded text-sm sm:text-base"
         >
           Undo
         </button>
 
         <button
           onClick={copyRoomLink}
-          className="bg-blue-600 text-white px-4 py-2 rounded"
+          className="bg-blue-600 text-white px-2 sm:px-4 py-1.5 sm:py-2 rounded text-sm sm:text-base"
         >
           Copy Link
         </button>
 
         <button
           onClick={handleClear}
-          className="bg-red-600 text-white px-4 py-2 rounded"
+          className="bg-red-600 text-white px-2 sm:px-4 py-1.5 sm:py-2 rounded text-sm sm:text-base"
         >
           Clear
         </button>
 
         <button
           onClick={exportImage}
-          className="bg-green-600 text-white px-4 py-2 rounded"
+          className="bg-green-600 text-white px-2 sm:px-4 py-1.5 sm:py-2 rounded text-sm sm:text-base"
         >
           Export
         </button>
@@ -346,7 +418,7 @@ const Whiteboard = () => {
           type="color"
           value={color}
           onChange={(e) => setColor(e.target.value)}
-          className="w-10 h-10 border rounded"
+          className="w-8 h-8 sm:w-10 sm:h-10 border rounded"
         />
 
         <input
@@ -355,7 +427,7 @@ const Whiteboard = () => {
           min="1"
           max="10"
           onChange={(e) => setWidth(Number(e.target.value))}
-          className="w-24"
+          className="w-16 sm:w-24"
         />
       </div>
 
@@ -363,14 +435,15 @@ const Whiteboard = () => {
         ref={canvasRef}
         className="absolute top-0 left-0 w-full h-full bg-white"
         style={{
-          cursor: tool === "eraser" 
+          touchAction: "none",
+          cursor: tool === "eraser"
             ? `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Crect x='2' y='6' width='16' height='10' rx='2' fill='%23fff' stroke='%23555' stroke-width='1.5'/%3E%3Crect x='2' y='6' width='7' height='10' rx='2' fill='%23f87171' stroke='%23555' stroke-width='1.5'/%3E%3C/svg%3E") 10 10, cell`
             : `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Cline x1='10' y1='0' x2='10' y2='20' stroke='black' stroke-width='1.5'/%3E%3Cline x1='0' y1='10' x2='20' y2='10' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 10 10, crosshair`
         }}
-        onMouseDown={startDrawing}
-        onMouseMove={draw}
-        onMouseUp={stopDrawing}
-        onMouseLeave={stopDrawing}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={handleStopDrawing}
+        onMouseLeave={handleStopDrawing}
       />
     </div>
   );
