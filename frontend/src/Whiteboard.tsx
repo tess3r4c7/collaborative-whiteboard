@@ -19,7 +19,7 @@ type Stroke = {
 };
 
 const CANVAS_WIDTH = 1600;
-const CANVAS_HEIGHT = 700;
+const CANVAS_HEIGHT = 900;
 
 const Whiteboard = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -424,6 +424,44 @@ const Whiteboard = () => {
       canvas.removeEventListener("touchend", onTouchEnd);
     };
   }, [handleStartDrawing, handleDraw, handleStopDrawing]);
+
+  // ─── Desktop: mouse wheel / touchpad panning & zooming ───
+
+  useEffect(() => {
+    const container = canvasWrapperRef.current?.parentElement;
+    if (!container) return;
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+
+      if (e.ctrlKey) {
+        // Ctrl + scroll = zoom (touchpad pinch generates this)
+        const zoomSensitivity = 0.01;
+        const oldScale = scaleRef.current;
+        const newScale = Math.min(3, Math.max(0.3, oldScale - e.deltaY * zoomSensitivity));
+        const ratio = newScale / oldScale;
+
+        // Focal-point zoom towards cursor position
+        const focalX = e.clientX;
+        const focalY = e.clientY;
+        panOffset.current.x = focalX - (focalX - panOffset.current.x) * ratio;
+        panOffset.current.y = focalY - (focalY - panOffset.current.y) * ratio;
+        scaleRef.current = newScale;
+      } else {
+        // Regular scroll = pan
+        panOffset.current.x -= e.deltaX;
+        panOffset.current.y -= e.deltaY;
+      }
+
+      applyTransform();
+    };
+
+    container.addEventListener("wheel", onWheel, { passive: false });
+
+    return () => {
+      container.removeEventListener("wheel", onWheel);
+    };
+  }, []);
 
   const handleUndo = () => {
     setStrokes((prev) => {
