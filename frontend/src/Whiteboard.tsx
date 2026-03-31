@@ -1,12 +1,12 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import { io } from "socket.io-client";
-import { useParams } from "react-router-dom";
+import { io, Socket } from "socket.io-client";
+import { useParams, useNavigate } from "react-router-dom";
+import { useAuth } from "./context/AuthContext";
+import { Pen, Eraser, Undo2, Share2, Trash2, Download, Home } from "lucide-react";
 
-const socket = io("https://whiteboard-backend-c3yc.onrender.com/", {
-  reconnection: true,
-  reconnectionAttempts: Infinity,
-  reconnectionDelay: 1000,
-});
+const API_URL = import.meta.env.VITE_API_URL || "https://whiteboard-backend-c3yc.onrender.com";
+
+let socket: Socket;
 
 type Point = { x: number, y: number };
 
@@ -22,6 +22,8 @@ const CANVAS_WIDTH = 1600;
 const CANVAS_HEIGHT = 900;
 
 const Whiteboard = () => {
+  const { user, token } = useAuth();
+  const navigate = useNavigate();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
@@ -47,6 +49,34 @@ const Whiteboard = () => {
   const [tool, setTool] = useState<"pen" | "eraser">("pen");
 
   const { roomId } = useParams();
+
+  // Remote cursors
+  type CursorInfo = { username: string; x: number; y: number; tool: string; color: string };
+  const [remoteCursors, setRemoteCursors] = useState<Record<string, CursorInfo>>({});
+
+  // Assign a consistent color to each remote user
+  const cursorColors = useRef<Record<string, string>>({});
+  const getCursorColor = (socketId: string) => {
+    if (!cursorColors.current[socketId]) {
+      const hue = (Object.keys(cursorColors.current).length * 137) % 360;
+      cursorColors.current[socketId] = `hsl(${hue}, 70%, 55%)`;
+    }
+    return cursorColors.current[socketId];
+  };
+
+  // Initialize socket with auth token
+  useEffect(() => {
+    socket = io(API_URL, {
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      auth: { token: token || "" },
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [token]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -149,6 +179,22 @@ const Whiteboard = () => {
       setStrokes((prev) => prev.filter((s) => s.id !== strokeId));
     });
 
+    // Cursor events
+    socket.on("cursorMove", (data: { socketId: string; username: string; x: number; y: number; tool: string; color: string }) => {
+      setRemoteCursors((prev) => ({
+        ...prev,
+        [data.socketId]: { username: data.username, x: data.x, y: data.y, tool: data.tool, color: data.color },
+      }));
+    });
+
+    socket.on("cursorLeave", (socketId: string) => {
+      setRemoteCursors((prev) => {
+        const next = { ...prev };
+        delete next[socketId];
+        return next;
+      });
+    });
+
     return () => {
       socket.off("start");
       socket.off("draw");
@@ -157,6 +203,8 @@ const Whiteboard = () => {
       socket.off("undoStroke");
       socket.off("clearCanvas");
       socket.off("eraseStroke");
+      socket.off("cursorMove");
+      socket.off("cursorLeave");
     };
   }, []);
 
@@ -526,50 +574,44 @@ const Whiteboard = () => {
     link.click();
   };
 
+  // Emit cursor position during drawing
+  const emitCursor = (x: number, y: number) => {
+    if (!socket) return;
+    socket.emit("cursorMove", { x, y, tool, color });
+  };
+
   return (
     <div className="relative w-screen h-screen overflow-hidden" style={{ touchAction: "none", backgroundColor: "#e5e7eb" }}>
-      {/* Toolbar — stays fixed in viewport, above the panning layer */}
-      <div className="absolute top-2 left-2 z-10 flex flex-wrap gap-1.5 sm:gap-2 items-center max-w-[calc(100vw-1rem)]">
+      {/* Redesigned pill toolbar */}
+      <div className="wb-toolbar">
+        <button onClick={() => navigate("/")} className="wb-tool-btn" title="Home">
+          <Home size={18} />
+        </button>
+
+        <div className="wb-toolbar-divider" />
+
         <button
-          onClick={() => setTool(tool === "pen" ? "eraser" : "pen")}
-          className="bg-gray-700 text-white px-2 sm:px-3 py-1.5 sm:py-2 rounded text-sm sm:text-base w-16 sm:w-20"
+          onClick={() => setTool("pen")}
+          className={`wb-tool-btn ${tool === "pen" ? "active" : ""}`}
+          title="Pen"
         >
-          {tool === "pen" ? "Pen" : "Eraser"}
+          <Pen size={18} />
         </button>
 
         <button
-          onClick={handleUndo}
-          className="bg-black text-white px-2 sm:px-4 py-1.5 sm:py-2 rounded text-sm sm:text-base"
+          onClick={() => setTool("eraser")}
+          className={`wb-tool-btn ${tool === "eraser" ? "active" : ""}`}
+          title="Eraser"
         >
-          Undo
-        </button>
-
-        <button
-          onClick={copyRoomLink}
-          className="bg-blue-600 text-white px-2 sm:px-4 py-1.5 sm:py-2 rounded text-sm sm:text-base"
-        >
-          Copy Link
-        </button>
-
-        <button
-          onClick={handleClear}
-          className="bg-red-600 text-white px-2 sm:px-4 py-1.5 sm:py-2 rounded text-sm sm:text-base"
-        >
-          Clear
-        </button>
-
-        <button
-          onClick={exportImage}
-          className="bg-green-600 text-white px-2 sm:px-4 py-1.5 sm:py-2 rounded text-sm sm:text-base"
-        >
-          Export
+          <Eraser size={18} />
         </button>
 
         <input
           type="color"
           value={color}
           onChange={(e) => setColor(e.target.value)}
-          className="w-8 h-8 sm:w-10 sm:h-10 border rounded"
+          className="wb-color-input"
+          title="Color"
         />
 
         <input
@@ -578,11 +620,54 @@ const Whiteboard = () => {
           min="1"
           max="10"
           onChange={(e) => setWidth(Number(e.target.value))}
-          className="w-16 sm:w-24"
+          className="wb-width-slider"
+          title="Brush size"
         />
+
+        <div className="wb-toolbar-divider" />
+
+        <button onClick={handleUndo} className="wb-tool-btn" title="Undo">
+          <Undo2 size={18} />
+        </button>
+
+        <button onClick={copyRoomLink} className="wb-tool-btn" title="Copy room link">
+          <Share2 size={18} />
+        </button>
+
+        <button onClick={exportImage} className="wb-tool-btn" title="Export image">
+          <Download size={18} />
+        </button>
+
+        <button onClick={handleClear} className="wb-tool-btn danger" title="Clear all">
+          <Trash2 size={18} />
+        </button>
+
+        <div className="wb-toolbar-divider" />
+
+        <span className="wb-room-code">{roomId}</span>
       </div>
 
-      {/* Pannable canvas wrapper — translated via ref for 60fps panning */}
+      {/* Remote cursor labels */}
+      {Object.entries(remoteCursors).map(([socketId, cursor]) => {
+        const cursorColor = getCursorColor(socketId);
+        // Convert canvas coords to screen coords using pan offset and scale
+        const screenX = cursor.x * scaleRef.current + panOffset.current.x;
+        const screenY = cursor.y * scaleRef.current + panOffset.current.y;
+        return (
+          <div
+            key={socketId}
+            className="cursor-label"
+            style={{ left: screenX, top: screenY }}
+          >
+            <div className="cursor-dot" style={{ backgroundColor: cursorColor }} />
+            <span className="cursor-name" style={{ backgroundColor: cursorColor }}>
+              {cursor.username}
+            </span>
+          </div>
+        );
+      })}
+
+      {/* Pannable canvas wrapper */}
       <div ref={canvasWrapperRef} style={{ position: "absolute", top: 0, left: 0 }}>
         <canvas
           ref={canvasRef}
@@ -598,9 +683,15 @@ const Whiteboard = () => {
               : `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Cline x1='10' y1='0' x2='10' y2='20' stroke='black' stroke-width='1.5'/%3E%3Cline x1='0' y1='10' x2='20' y2='10' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 10 10, crosshair`
           }}
           onMouseDown={onMouseDown}
-          onMouseMove={onMouseMove}
+          onMouseMove={(e) => {
+            onMouseMove(e);
+            emitCursor(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
+          }}
           onMouseUp={handleStopDrawing}
-          onMouseLeave={handleStopDrawing}
+          onMouseLeave={() => {
+            handleStopDrawing();
+            socket?.emit("cursorLeave");
+          }}
         />
       </div>
     </div>
