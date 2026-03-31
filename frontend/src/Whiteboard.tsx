@@ -22,7 +22,7 @@ const CANVAS_WIDTH = 1600;
 const CANVAS_HEIGHT = 900;
 
 const Whiteboard = () => {
-  const { user, token } = useAuth();
+  const { token } = useAuth();
   const navigate = useNavigate();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
