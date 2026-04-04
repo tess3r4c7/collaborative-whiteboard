@@ -54,6 +54,10 @@ const Whiteboard = () => {
   type CursorInfo = { username: string; x: number; y: number; tool: string; color: string };
   const [remoteCursors, setRemoteCursors] = useState<Record<string, CursorInfo>>({});
 
+  // Remote drawing state — tracks last point + style per remote user
+  type RemoteDrawInfo = { lastPoint: Point; color: string; width: number };
+  const remoteDrawState = useRef<Record<string, RemoteDrawInfo>>({});
+
   // Assign a consistent color to each remote user
   const cursorColors = useRef<Record<string, string>>({});
   const getCursorColor = (socketId: string) => {
@@ -137,25 +141,37 @@ const Whiteboard = () => {
   }, []);
 
   useEffect(() => {
-    socket.on("start", ({ x, y, color, width }) => {
+    socket.on("start", ({ x, y, color, width, socketId: remoteId }: { x: number; y: number; color: string; width: number; socketId: string }) => {
+      // Store the remote user's starting state — don't touch the canvas context
+      remoteDrawState.current[remoteId] = { lastPoint: { x, y }, color, width };
+    });
+
+    socket.on("draw", ({ points, socketId: remoteId }: { points: Point[]; socketId: string }) => {
       const ctx = ctxRef.current;
       if (!ctx) return;
 
-      ctx.lineWidth = width;
-      ctx.strokeStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-    });
+      const state = remoteDrawState.current[remoteId];
+      if (!state) return;
 
-    socket.on("draw", (points: Point[]) => {
-      const ctx = ctxRef.current
-      if (!ctx) return
+      // Draw self-contained segments — doesn't interfere with local path
+      ctx.save();
+      ctx.strokeStyle = state.color;
+      ctx.lineWidth = state.width;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
 
+      let prev = state.lastPoint;
       for (const p of points) {
+        ctx.beginPath();
+        ctx.moveTo(prev.x, prev.y);
         ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+        prev = p;
       }
+      ctx.restore();
 
-      ctx.stroke();
+      // Update last known position
+      state.lastPoint = prev;
     });
 
     socket.on("strokeComplete", (stroke: Stroke) => {
@@ -320,9 +336,18 @@ const Whiteboard = () => {
 
     ctx.lineWidth = width;
     ctx.strokeStyle = color;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
 
-    ctx.lineTo(x, y);
-    ctx.stroke();
+    // Self-contained segment — prevents cross-user line artifacts
+    const prevPoints = currentStroke.current?.points;
+    const lastPt = prevPoints && prevPoints.length > 0 ? prevPoints[prevPoints.length - 1] : null;
+    if (lastPt) {
+      ctx.beginPath();
+      ctx.moveTo(lastPt.x, lastPt.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    }
 
     if (currentStroke.current) {
       currentStroke.current.points.push({ x, y });

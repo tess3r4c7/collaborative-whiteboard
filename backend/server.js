@@ -97,12 +97,12 @@ io.on("connection", (socket) => {
 
   socket.on("start", (data) => {
     if (!socket.roomId) return;
-    socket.to(socket.roomId).emit("start", data);
+    socket.to(socket.roomId).emit("start", { ...data, socketId: socket.id });
   });
 
   socket.on("draw", (data) => {
     if (!socket.roomId) return;
-    socket.to(socket.roomId).emit("draw", data);
+    socket.to(socket.roomId).emit("draw", { points: data, socketId: socket.id });
   });
 
   socket.on("strokeComplete", (stroke) => {

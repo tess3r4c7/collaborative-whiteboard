@@ -641,16 +641,32 @@ html, body {
     padding: 32px 24px;
   }
   .wb-toolbar {
-    top: 8px;
-    padding: 4px 8px;
-    gap: 2px;
+    top: auto;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 6px 8px;
+    gap: 3px;
     border-radius: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: calc(100vw - 24px);
   }
   .wb-tool-btn {
     width: 32px;
     height: 32px;
   }
+  .wb-toolbar-divider {
+    display: none;
+  }
   .wb-room-code {
     display: none;
+  }
+  .wb-color-input {
+    width: 26px;
+    height: 26px;
+  }
+  .wb-width-slider {
+    width: 45px;
   }
 }
