@@ -133,6 +133,14 @@ io.on("connection", (socket) => {
     socket.to(socket.roomId).emit("eraseStroke", strokeId);
   });
 
+  socket.on("redoStroke", (stroke) => {
+    if (!socket.roomId) return;
+    if (roomStrokes[socket.roomId]) {
+      roomStrokes[socket.roomId].push(stroke);
+    }
+    socket.to(socket.roomId).emit("redoStroke", stroke);
+  });
+
   // ─── Cursor position broadcasting ───
   socket.on("cursorMove", (data) => {
     if (!socket.roomId) return;

@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
-import { Pen, Eraser, Undo2, Share2, Trash2, Download, Home } from "lucide-react";
+import { Pen, Eraser, Undo2, Redo2, Share2, Trash2, Download, Home } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || "https://whiteboard-backend-c3yc.onrender.com";
 
@@ -18,8 +18,8 @@ type Stroke = {
   width: number;
 };
 
-const CANVAS_WIDTH = 1600;
-const CANVAS_HEIGHT = 900;
+const CANVAS_WIDTH = 3200;
+const CANVAS_HEIGHT = 1800;
 
 const Whiteboard = () => {
   const { token } = useAuth();
@@ -35,6 +35,7 @@ const Whiteboard = () => {
 
   const lastEmitTime = useRef(0);
   const pointBuffer = useRef<Point[]>([]);
+  const redoStack = useRef<Stroke[]>([]);
 
   // Pan & zoom state (refs for 60fps direct DOM updates, no re-renders)
   const panOffset = useRef({ x: 0, y: 0 });
@@ -201,6 +202,10 @@ const Whiteboard = () => {
       setStrokes((prev) => prev.filter((s) => s.id !== strokeId));
     });
 
+    socket.on("redoStroke", (stroke: Stroke) => {
+      setStrokes((prev) => [...prev, stroke]);
+    });
+
     // Cursor events
     socket.on("cursorMove", (data: { socketId: string; username: string; x: number; y: number; tool: string; color: string }) => {
       setRemoteCursors((prev) => ({
@@ -225,6 +230,7 @@ const Whiteboard = () => {
       socket.off("undoStroke");
       socket.off("clearCanvas");
       socket.off("eraseStroke");
+      socket.off("redoStroke");
       socket.off("cursorMove");
       socket.off("cursorLeave");
     };
@@ -390,6 +396,8 @@ const Whiteboard = () => {
     if (strokeToCommit.points.length > 1) {
       setStrokes((prev) => [...prev, strokeToCommit]);
       socket.emit("strokeComplete", strokeToCommit);
+      // New stroke clears redo stack
+      redoStack.current = [];
     }
 
     currentStroke.current = null;
@@ -555,10 +563,21 @@ const Whiteboard = () => {
       const realIndex = prev.length - 1 - index;
       const strokeToRemove = prev[realIndex];
 
+      // Push to redo stack before removing
+      redoStack.current.push(strokeToRemove);
+
       socket.emit("undoStroke", strokeToRemove.id);
 
       return prev.filter((s) => s.id !== strokeToRemove.id);
     });
+  };
+
+  const handleRedo = () => {
+    const strokeToRedo = redoStack.current.pop();
+    if (!strokeToRedo) return;
+
+    setStrokes((prev) => [...prev, strokeToRedo]);
+    socket.emit("redoStroke", strokeToRedo);
   };
 
   const copyRoomLink = async () => {
@@ -572,6 +591,7 @@ const Whiteboard = () => {
 
   const handleClear = () => {
     setStrokes([]);
+    redoStack.current = [];
     socket.emit("clearCanvas");
   };
 
@@ -661,6 +681,10 @@ const Whiteboard = () => {
 
         <button onClick={handleUndo} className="wb-tool-btn" title="Undo">
           <Undo2 size={18} />
+        </button>
+
+        <button onClick={handleRedo} className="wb-tool-btn" title="Redo">
+          <Redo2 size={18} />
         </button>
 
         <button onClick={copyRoomLink} className="wb-tool-btn" title="Copy room link">
