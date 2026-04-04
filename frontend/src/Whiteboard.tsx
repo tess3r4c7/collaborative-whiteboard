@@ -48,6 +48,12 @@ const Whiteboard = () => {
 
   const [tool, setTool] = useState<"pen" | "eraser">("pen");
 
+  // Refs mirroring state so touch useEffect closures always have fresh values
+  const toolRef = useRef(tool);
+  const colorRef = useRef(color);
+  toolRef.current = tool;
+  colorRef.current = color;
+
   const { roomId } = useParams();
 
   // Remote cursors
@@ -426,6 +432,7 @@ const Whiteboard = () => {
       if (e.touches.length === 1 && !isPanning.current) {
         const pos = getTouchPos(e.touches[0]);
         handleStartDrawing(pos.x, pos.y);
+        emitCursor(pos.x, pos.y);
       }
     };
 
@@ -467,6 +474,7 @@ const Whiteboard = () => {
       if (e.touches.length === 1 && !isPanning.current) {
         const pos = getTouchPos(e.touches[0]);
         handleDraw(pos.x, pos.y);
+        emitCursor(pos.x, pos.y);
       }
     };
 
@@ -481,7 +489,7 @@ const Whiteboard = () => {
         return;
       }
 
-      // Stop drawing when finger is lifted
+      // Stop drawing when finger is lifted — cursor stays at last position
       if (e.touches.length === 0) {
         handleStopDrawing();
       }
@@ -599,10 +607,10 @@ const Whiteboard = () => {
     link.click();
   };
 
-  // Emit cursor position during drawing
+  // Emit cursor position during drawing (uses refs for fresh values in touch closures)
   const emitCursor = (x: number, y: number) => {
     if (!socket) return;
-    socket.emit("cursorMove", { x, y, tool, color });
+    socket.emit("cursorMove", { x, y, tool: toolRef.current, color: colorRef.current });
   };
 
   return (
