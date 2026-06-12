@@ -552,7 +552,7 @@ const Whiteboard = () => {
     };
   }, []);
 
-  const handleUndo = () => {
+  const handleUndo = useCallback(() => {
     setStrokes((prev) => {
       const index = [...prev].reverse().findIndex(
         (stroke) => stroke.userId === (socket.id || "local")
@@ -570,15 +570,61 @@ const Whiteboard = () => {
 
       return prev.filter((s) => s.id !== strokeToRemove.id);
     });
-  };
+  }, []);
 
-  const handleRedo = () => {
+  const handleRedo = useCallback(() => {
     const strokeToRedo = redoStack.current.pop();
     if (!strokeToRedo) return;
 
     setStrokes((prev) => [...prev, strokeToRedo]);
     socket.emit("redoStroke", strokeToRedo);
-  };
+  }, []);
+
+  // ─── Keyboard shortcuts ───
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Don't fire shortcuts when typing in input fields
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      const ctrl = e.ctrlKey || e.metaKey;
+
+      // Ctrl+Z = Undo
+      if (ctrl && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+      // Ctrl+Y or Ctrl+Shift+Z = Redo
+      if ((ctrl && e.key === "y") || (ctrl && e.key === "z" && e.shiftKey)) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+
+      // Single-key shortcuts (no ctrl)
+      if (ctrl) return;
+
+      switch (e.key.toLowerCase()) {
+        case "p":
+          setTool("pen");
+          break;
+        case "e":
+          setTool("eraser");
+          break;
+        case "1":
+          setTool("pen");
+          break;
+        case "2":
+          setTool("eraser");
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleUndo, handleRedo]);
 
   const copyRoomLink = async () => {
     try {
