@@ -1,10 +1,25 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const User = require("../models/User");
 const authMiddleware = require("../middleware/auth");
 
 const router = express.Router();
+
+const isDatabaseConnected = () => mongoose.connection.readyState === 1;
+
+const ensureBackendReady = (res) => {
+  if (!isDatabaseConnected()) {
+    return res.status(503).json({ error: "Database unavailable. Check MongoDB connection settings." });
+  }
+
+  if (!process.env.JWT_SECRET) {
+    return res.status(500).json({ error: "Server authentication is not configured." });
+  }
+
+  return null;
+};
 
 // Helper: generate JWT
 const generateToken = (user) => {
@@ -20,6 +35,9 @@ const generateToken = (user) => {
 // ────────────────────────────────────────
 router.post("/signup", async (req, res) => {
   try {
+    const notReady = ensureBackendReady(res);
+    if (notReady) return notReady;
+
     const { username, email, password } = req.body;
 
     if (!username || !email || !password) {
@@ -56,6 +74,9 @@ router.post("/signup", async (req, res) => {
     });
   } catch (err) {
     console.error("Signup error:", err);
+    if (err.code === 11000) {
+      return res.status(400).json({ error: "Email or username already registered" });
+    }
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -65,6 +86,9 @@ router.post("/signup", async (req, res) => {
 // ────────────────────────────────────────
 router.post("/login", async (req, res) => {
   try {
+    const notReady = ensureBackendReady(res);
+    if (notReady) return notReady;
+
     const { identifier, password } = req.body;
 
     if (!identifier || !password) {
@@ -101,6 +125,10 @@ router.post("/login", async (req, res) => {
 // ────────────────────────────────────────
 router.get("/me", authMiddleware, async (req, res) => {
   try {
+    if (!isDatabaseConnected()) {
+      return res.status(503).json({ error: "Database unavailable. Check MongoDB connection settings." });
+    }
+
     const user = await User.findById(req.user.id).select("-passwordHash");
     if (!user) return res.status(404).json({ error: "User not found" });
     res.json({ username: user.username, email: user.email });

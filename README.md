@@ -123,13 +123,13 @@ For production, set `VITE_API_URL` to the deployed backend URL.
 
 ```bash
 cd backend
-node server.js
+npm start
 ```
 
 For development with auto-restart:
 
 ```bash
-npx nodemon server.js
+npm run dev
 ```
 
 The backend runs on `http://localhost:5000` by default.
@@ -159,8 +159,8 @@ npm run preview   # Preview production build
 Backend:
 
 ```bash
-node server.js          # Start backend server
-npx nodemon server.js   # Start backend with auto-restart
+npm start     # Start backend server
+npm run dev   # Start backend with auto-restart
 ```
 
 ## How It Works

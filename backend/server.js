@@ -8,13 +8,26 @@ const jwt = require("jsonwebtoken");
 const authRoutes = require("./routes/auth");
 const Room = require("./models/Room");
 
+const configuredFrontendUrls = (process.env.FRONTEND_URL || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const allowedOrigins = [
   "https://collaborative-whiteboard-pearl.vercel.app",
   "http://localhost:5173",
+  ...configuredFrontendUrls,
 ];
 
 const app = express();
-app.use(cors({ origin: allowedOrigins }));
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS blocked origin: ${origin}`));
+  },
+}));
 app.use(express.json());
 
 const server = http.createServer(app);
@@ -26,8 +39,16 @@ const io = new Server(server, {
 });
 
 // ─── MongoDB connection ───
+if (!process.env.MONGODB_URI) {
+  console.error("Missing required environment variable: MONGODB_URI");
+}
+
+if (!process.env.JWT_SECRET) {
+  console.error("Missing required environment variable: JWT_SECRET");
+}
+
 mongoose
-  .connect(process.env.MONGODB_URI)
+  .connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
   .then(() => console.log("Connected to MongoDB"))
   .catch((err) => console.error("MongoDB connection error:", err));
 
@@ -39,6 +60,19 @@ app.get("/", (req, res) => {
 });
 
 // ─── In-memory cache (mirrors DB for fast real-time access) ───
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    database: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+    env: {
+      mongodbUri: Boolean(process.env.MONGODB_URI),
+      jwtSecret: Boolean(process.env.JWT_SECRET),
+      frontendUrl: Boolean(process.env.FRONTEND_URL),
+    },
+    allowedOrigins,
+  });
+});
+
 const roomCache = {};
 
 // Helper: persist strokes to DB (debounced per room)
