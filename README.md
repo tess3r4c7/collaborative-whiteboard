@@ -215,7 +215,3 @@ The project is split into two deployable apps:
 - Add image import support
 - Add presence list for active collaborators
 - Add automated tests for auth routes and socket events
-
-## Author
-
-Built as a resume project to demonstrate real-time collaboration, full-stack architecture, authenticated workflows, and persistent canvas state.
