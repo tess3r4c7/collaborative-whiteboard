@@ -43,7 +43,12 @@ A full-stack real-time collaborative whiteboard built with React, TypeScript, Ex
 
 ```text
 collaborative whiteboard/
++-- .github/
+|   +-- workflows/
+|       +-- ci-cd.yml
 +-- backend/
+|   +-- __tests__/
+|   |   +-- auth.test.js
 |   +-- middleware/
 |   |   +-- auth.js
 |   +-- models/
@@ -51,6 +56,8 @@ collaborative whiteboard/
 |   |   +-- User.js
 |   +-- routes/
 |   |   +-- auth.js
+|   +-- Dockerfile
+|   +-- .dockerignore
 |   +-- package.json
 |   +-- server.js
 +-- frontend/
@@ -64,8 +71,19 @@ collaborative whiteboard/
 |   |   +-- Home.tsx
 |   |   +-- Whiteboard.tsx
 |   |   +-- main.tsx
+|   +-- Dockerfile
+|   +-- .dockerignore
+|   +-- nginx.conf
 |   +-- package.json
 |   +-- vite.config.ts
++-- k8s/
+|   +-- namespace.yaml
+|   +-- configmap.yaml
+|   +-- secret.yaml
+|   +-- backend-deployment.yaml
+|   +-- backend-service.yaml
+|   +-- frontend-deployment.yaml
+|   +-- frontend-service.yaml
 +-- .gitignore
 +-- README.md
 ```
@@ -197,15 +215,109 @@ Socket.IO events include:
 - `cursorMove`
 - `cursorLeave`
 
+## CI/CD Pipeline
+
+The project includes a complete GitHub Actions CI/CD pipeline that runs on every push to `main` and on pull requests.
+
+### Pipeline Stages
+
+```
+ Push/PR to main
+       │
+       ▼
+ ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+ │  🔍 Lint │───▶│ 🧪 Test  │───▶│ 🐳 Build │───▶│ 🛡️ Scan  │───▶│ 📦 Push  │───▶│ 🚀 Deploy│
+ │  ESLint  │    │  Jest +  │    │  Docker  │    │  Trivy   │    │  GHCR    │    │  K8s     │
+ │  tsc     │    │ Supertest│    │  images  │    │  CVEs    │    │  SHA tag │    │ rollout  │
+ └──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
+                                                                  main only ────▶ main only
+```
+
+| Stage | What it does |
+| --- | --- |
+| **Lint** | ESLint + TypeScript type checking on the frontend |
+| **Test** | 14 Jest unit tests for auth routes and health endpoint (in-memory MongoDB) |
+| **Build** | Multi-stage Docker builds for backend + frontend, tagged with commit SHA |
+| **Scan** | Trivy vulnerability scan — blocks on CRITICAL and HIGH severity CVEs |
+| **Push** | Pushes images to GitHub Container Registry (main branch only) |
+| **Deploy** | Applies Kubernetes manifests, waits for rolling update to complete |
+
+### Image Tagging
+
+Images are tagged by commit SHA, never just `latest`:
+
+```
+ghcr.io/<user>/whiteboard-backend:sha-abc1234
+ghcr.io/<user>/whiteboard-frontend:sha-abc1234
+```
+
+## Docker
+
+Both services use multi-stage Dockerfiles for minimal production images:
+
+```bash
+# Backend (~120MB vs ~1GB naive)
+docker build -t whiteboard-backend ./backend
+
+# Frontend (~25MB vs ~1GB naive)
+docker build --build-arg VITE_API_URL=http://localhost:5000 -t whiteboard-frontend ./frontend
+```
+
+Run locally:
+
+```bash
+docker run -p 5000:5000 -e MONGODB_URI=your_uri -e JWT_SECRET=your_secret whiteboard-backend
+docker run -p 3000:80 whiteboard-frontend
+```
+
+## Kubernetes Deployment
+
+All K8s manifests are in `k8s/`. Features:
+
+- **Rolling updates**: `maxSurge: 1`, `maxUnavailable: 0` for zero-downtime deploys
+- **Health probes**: Readiness + liveness probes on `/api/health` (backend) and `/` (frontend)
+- **Resource limits**: Memory and CPU constraints per container
+- **Namespace isolation**: Everything runs in the `whiteboard` namespace
+
+### Deploy to a Local kind Cluster
+
+```bash
+kind create cluster --name whiteboard
+# Edit k8s/secret.yaml with real values
+kubectl apply -f k8s/
+kubectl port-forward svc/whiteboard-frontend -n whiteboard 3000:80
+```
+
+### Rollback
+
+```bash
+kubectl rollout undo deployment/whiteboard-backend -n whiteboard
+kubectl rollout status deployment/whiteboard-backend -n whiteboard
+```
+
+## Testing
+
+```bash
+cd backend
+npm install
+npm test    # 14 tests, in-memory MongoDB, no real DB needed
+```
+
+| Suite | Tests | Coverage |
+| --- | --- | --- |
+| `GET /api/health` | 1 | Health status |
+| `GET /` | 1 | Liveness |
+| `POST /api/auth/signup` | 5 | Creation, duplicates, validation |
+| `POST /api/auth/login` | 4 | Auth, wrong creds, unknown user |
+| `GET /api/auth/me` | 3 | Token validation |
+
 ## Deployment Notes
 
-The project is split into two deployable apps:
+The project supports two deployment paths:
 
-- Deploy `frontend` to Vercel, Netlify, or another static frontend host.
-- Deploy `backend` to Render, Railway, Fly.io, or another Node.js server host.
-- Add the deployed frontend URL to the backend Socket.IO/CORS allowed origins in `backend/server.js`.
-- Set `VITE_API_URL` in the frontend host to the deployed backend URL.
-- Set `MONGODB_URI` and `JWT_SECRET` in the backend host environment variables.
+**Path 1: Vercel + Render** — Deploy `frontend` to Vercel, `backend` to Render. Set `VITE_API_URL`, `MONGODB_URI`, `JWT_SECRET` as environment variables.
+
+**Path 2: Kubernetes** — Push to `main` triggers the CI/CD pipeline. Docker images are built, scanned, pushed to GHCR, and deployed to K8s with rolling updates.
 
 ## Future Improvements
 
@@ -214,4 +326,5 @@ The project is split into two deployable apps:
 - Add role-based room permissions
 - Add image import support
 - Add presence list for active collaborators
-- Add automated tests for auth routes and socket events
+- Add end-to-end tests with Cypress
+- Add Helm chart for Kubernetes deployment

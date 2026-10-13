@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: whiteboard-backend
+  namespace: whiteboard
+spec:
+  type: ClusterIP
+  selector:
+    app: whiteboard-backend
+  ports:
+    - protocol: TCP
+      port: 5000
+      targetPort: 5000
