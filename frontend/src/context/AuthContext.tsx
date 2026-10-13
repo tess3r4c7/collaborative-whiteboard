@@ -18,6 +18,7 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
@@ -26,33 +27,29 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem("wb_token"));
+  const [loading, setLoading] = useState(() => !!localStorage.getItem("wb_token"));
 
-  // Load token from localStorage on mount
+  // Verify saved token on mount
   useEffect(() => {
-    const savedToken = localStorage.getItem("wb_token");
-    if (savedToken) {
-      setToken(savedToken);
-      // Verify token is still valid
-      fetch(`${API_URL}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${savedToken}` },
+    if (!token) return;
+
+    fetch(`${API_URL}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => {
+        if (res.ok) return res.json();
+        throw new Error("Invalid token");
       })
-        .then((res) => {
-          if (res.ok) return res.json();
-          throw new Error("Invalid token");
-        })
-        .then((data) => {
-          setUser({ username: data.username, email: data.email });
-        })
-        .catch(() => {
-          localStorage.removeItem("wb_token");
-          setToken(null);
-        })
-        .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+      .then((data) => {
+        setUser({ username: data.username, email: data.email });
+      })
+      .catch(() => {
+        localStorage.removeItem("wb_token");
+        setToken(null);
+      })
+      .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const login = async (identifier: string, password: string) => {

@@ -52,8 +52,10 @@ const Whiteboard = () => {
   // Refs mirroring state so touch useEffect closures always have fresh values
   const toolRef = useRef(tool);
   const colorRef = useRef(color);
-  toolRef.current = tool;
-  colorRef.current = color;
+  useEffect(() => {
+    toolRef.current = tool;
+    colorRef.current = color;
+  }, [tool, color]);
 
   const { roomId } = useParams();
 
@@ -144,7 +146,12 @@ const Whiteboard = () => {
       panOffset.current.y = -(CANVAS_HEIGHT - vh) / 2;
     }
     scaleRef.current = 1;
-    applyTransform();
+    // Inline transform (applyTransform is declared later in the component)
+    if (canvasWrapperRef.current) {
+      canvasWrapperRef.current.style.transform =
+        `translate(${panOffset.current.x}px, ${panOffset.current.y}px) scale(${scaleRef.current})`;
+      canvasWrapperRef.current.style.transformOrigin = "0 0";
+    }
   }, []);
 
   useEffect(() => {
@@ -236,20 +243,7 @@ const Whiteboard = () => {
     };
   }, []);
 
-  useEffect(() => {
-    redrawCanvas();
-  }, [strokes]);
-
-  useEffect(() => {
-    const handleResize = () => {
-      redrawCanvas();
-    };
-
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, [strokes]);
-
-  const redrawCanvas = () => {
+  const redrawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -273,7 +267,21 @@ const Whiteboard = () => {
 
       ctx.stroke()
     }
-  };
+  }, [strokes]);
+
+  useEffect(() => {
+    redrawCanvas();
+  }, [redrawCanvas]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      redrawCanvas();
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [redrawCanvas]);
+
 
   // Apply combined translate + scale transform to the canvas wrapper
   const applyTransform = () => {
@@ -334,6 +342,28 @@ const Whiteboard = () => {
 
     socket.emit("start", { x, y, color, width });
   }, [tool, color, width]);
+
+  const handleErase = (x: number, y: number) => {
+    const threshold = 10;
+
+    setStrokes((prev) => {
+      const remaining = prev.filter((stroke) => {
+        return !stroke.points.some((p) => {
+          const dx = p.x - x;
+          const dy = p.y - y;
+          return Math.sqrt(dx * dx + dy * dy) < threshold;
+        });
+      });
+
+      const removed = prev.filter((s) => !remaining.includes(s));
+
+      removed.forEach((s) => {
+        socket.emit("eraseStroke", s.id);
+      });
+
+      return remaining;
+    });
+  };
 
   const handleDraw = useCallback((x: number, y: number) => {
     if (tool === "eraser") {
@@ -414,6 +444,12 @@ const Whiteboard = () => {
   };
 
   // ─── Touch event listeners (1 finger = draw, 2 fingers = pan + zoom) ───
+
+  // Emit cursor position during drawing (uses refs for fresh values in touch closures)
+  const emitCursor = (x: number, y: number) => {
+    if (!socket) return;
+    socket.emit("cursorMove", { x, y, tool: toolRef.current, color: colorRef.current });
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -641,27 +677,6 @@ const Whiteboard = () => {
     socket.emit("clearCanvas");
   };
 
-  const handleErase = (x: number, y: number) => {
-    const threshold = 10;
-
-    setStrokes((prev) => {
-      const remaining = prev.filter((stroke) => {
-        return !stroke.points.some((p) => {
-          const dx = p.x - x;
-          const dy = p.y - y;
-          return Math.sqrt(dx * dx + dy * dy) < threshold;
-        });
-      });
-
-      const removed = prev.filter((s) => !remaining.includes(s));
-
-      removed.forEach((s) => {
-        socket.emit("eraseStroke", s.id);
-      });
-
-      return remaining;
-    });
-  };
 
   const exportImage = () => {
     const canvas = canvasRef.current;
@@ -673,11 +688,6 @@ const Whiteboard = () => {
     link.click();
   };
 
-  // Emit cursor position during drawing (uses refs for fresh values in touch closures)
-  const emitCursor = (x: number, y: number) => {
-    if (!socket) return;
-    socket.emit("cursorMove", { x, y, tool: toolRef.current, color: colorRef.current });
-  };
 
   return (
     <div className="relative w-screen h-screen overflow-hidden" style={{ touchAction: "none", backgroundColor: "#e5e7eb" }}>
@@ -751,6 +761,7 @@ const Whiteboard = () => {
       </div>
 
       {/* Remote cursor labels */}
+      {/* eslint-disable-next-line react-hooks/refs -- reading transform refs for visual positioning, converting to state would hurt 60fps pan/zoom */}
       {Object.entries(remoteCursors).map(([socketId, cursor]) => {
         const cursorColor = getCursorColor(socketId);
         // Convert canvas coords to screen coords using pan offset and scale

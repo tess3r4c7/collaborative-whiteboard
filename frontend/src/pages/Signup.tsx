@@ -27,8 +27,8 @@ export default function Signup() {
       if (message.includes("auto-verified")) {
         setTimeout(() => navigate("/"), 1000);
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Signup failed");
     } finally {
       setLoading(false);
     }

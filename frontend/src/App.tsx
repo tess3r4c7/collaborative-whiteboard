@@ -27,15 +27,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function VerifyPage() {
   const params = new URLSearchParams(window.location.search);
   const token = params.get("token");
-  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
-  const [message, setMessage] = useState("");
+  const [status, setStatus] = useState<"loading" | "success" | "error">(token ? "loading" : "error");
+  const [message, setMessage] = useState(token ? "" : "Missing verification token");
 
   useEffect(() => {
-    if (!token) {
-      setStatus("error");
-      setMessage("Missing verification token");
-      return;
-    }
+    if (!token) return;
 
     const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
     fetch(`${API_URL}/api/auth/verify?token=${token}`)
