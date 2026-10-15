@@ -17,17 +17,18 @@
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
-    "mongoose": "^9.3.3",
-    "nodemailer": "^8.0.4",
-    "socket.io": "^4.8.3"
+    "mongoose": "9.7.2",
+    "nodemailer": "^10.1.1",
+    "socket.io": "^4.8.4"
   },
   "devDependencies": {
     "jest": "^29.7.0",
-    "mongodb-memory-server": "^10.4.0",
+    "mongodb-memory-server": "^11.3.0",
     "nodemon": "^3.1.11",
     "supertest": "^7.1.0"
   },
   "overrides": {
-    "ws": "8.21.0"
+    "ws": "8.21.0",
+    "socket.io-parser": "4.2.7"
   }
 }
