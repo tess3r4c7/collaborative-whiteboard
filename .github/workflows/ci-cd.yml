@@ -185,14 +185,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: push
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    env:
+      KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4
-
-      - name: Configure kubeconfig
-        run: echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
 
       - name: Update image tags in manifests
         run: |
@@ -200,7 +199,17 @@ jobs:
           sed -i "s|image: ghcr.io/.*/whiteboard-backend:.*|image: ${{ env.BACKEND_IMAGE }}:${TAG}|g" k8s/backend-deployment.yaml
           sed -i "s|image: ghcr.io/.*/whiteboard-frontend:.*|image: ${{ env.FRONTEND_IMAGE }}:${TAG}|g" k8s/frontend-deployment.yaml
 
+      - name: Validate Kubernetes manifests (client dry-run)
+        run: kubectl apply --dry-run=client --validate=false -f k8s/
+
+      - name: Configure kubeconfig
+        if: env.KUBE_CONFIG != ''
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+
       - name: Apply Kubernetes manifests
+        if: env.KUBE_CONFIG != ''
         run: |
           kubectl apply -f k8s/namespace.yaml
           kubectl apply -f k8s/configmap.yaml
@@ -211,11 +220,14 @@ jobs:
           kubectl apply -f k8s/frontend-service.yaml
 
       - name: Wait for rollout
+        if: env.KUBE_CONFIG != ''
         run: |
           kubectl rollout status deployment/whiteboard-backend -n whiteboard --timeout=120s
           kubectl rollout status deployment/whiteboard-frontend -n whiteboard --timeout=120s
 
       - name: Verify deployment health
+        if: env.KUBE_CONFIG != ''
         run: |
           kubectl get pods -n whiteboard
           kubectl get services -n whiteboard
+

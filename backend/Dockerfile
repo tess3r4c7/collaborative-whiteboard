@@ -7,6 +7,8 @@ RUN npm ci --omit=dev
 # Stage 2: Production runtime
 FROM node:20-alpine
 WORKDIR /app
+# Upgrade Alpine OS packages (e.g., openssl CVE-2026-45447) to latest patched versions
+RUN apk update && apk upgrade --no-cache && rm -rf /var/cache/apk/*
 RUN addgroup -g 1001 -S nodejs && adduser -S appuser -u 1001
 # Remove npm/npx (not needed at runtime) — also removes bundled vulnerable ws
 RUN npm cache clean --force && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
